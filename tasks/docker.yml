@@ -1,0 +1,97 @@
+---
+# tasks file for prometheus docker
+
+- name: prometheus | docker-python
+  become: yes
+  yum:
+    name: docker-python
+    state: present
+
+- name: prometheus | docker network
+  become: yes
+  docker_network:
+    name: "{{ prometheus_docker_network }}"
+    state: present
+
+- name: prometheus | docker alertmanager
+  become: yes
+  docker_container:
+    command: >
+      --config.file=/etc/prometheus/alertmanager.yml
+      --storage.path=/alertmanager
+      {{ prometheus_alertmanager_additional_command_args }}
+    image: prom/alertmanager:v0.14.0
+    name: alertmanager
+    networks:
+    - name: "{{ prometheus_docker_network }}"
+    published_ports: "{{ (prometheus_alertmanager_port > 0) | ternary([(prometheus_alertmanager_port | string) + ':9093'], []) }}"
+    #read_only: True
+    recreate: "{{ prometheus_alertmanager_configuration.changed }}"
+    restart_policy: always
+    state: started
+    volumes:
+    - /etc/prometheus/alertmanager.yml:/etc/prometheus/alertmanager.yml:ro
+    - alertmanager-data:/alertmanager
+
+- name: prometheus | docker blackbox-exporter
+  become: yes
+  docker_container:
+    command: "--config.file=/etc/prometheus/blackbox-exporter.yml"
+    image: prom/blackbox-exporter:v0.12.0
+    name: blackbox-exporter
+    networks:
+    - name: "{{ prometheus_docker_network }}"
+    published_ports: "{{ (prometheus_blackboxexporter_port > 0) | ternary([(prometheus_blackboxexporter_port | string) + ':9115'], []) }}"
+    #read_only: True
+    recreate: "{{ prometheus_blackboxexporter_configuration.changed }}"
+    restart_policy: always
+    state: started
+    volumes:
+    - /etc/prometheus/blackbox-exporter.yml:/etc/prometheus/blackbox-exporter.yml:ro
+
+- name: prometheus | docker prometheus
+  become: yes
+  docker_container:
+    command: >
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.path=/prometheus
+      --web.console.libraries=/usr/share/prometheus/console_libraries
+      --web.console.templates=/usr/share/prometheus/consoles
+      {{ prometheus_additional_command_args }}
+    image: prom/prometheus:v2.2.1
+    name: prometheus
+    networks:
+    - name: "{{ prometheus_docker_network }}"
+    published_ports: "{{ (prometheus_port > 0) | ternary([(prometheus_port | string) + ':9090'], []) }}"
+    #read_only: True
+    recreate: "{{ prometheus_configuration.changed or prometheus_alert_rules.changed }}"
+    restart_policy: always
+    state: started
+    volumes:
+    # We could mount /etc/prometheus instead but the Docker image contains
+    # additional (optional) files
+    - /etc/prometheus/rules/:/etc/prometheus/rules/:ro
+    - /etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - /etc/prometheus/targets/:/etc/prometheus/targets/:ro
+    - prometheus-data:/prometheus
+
+# In certain situations if a manual change means Prometheus in Docker
+# auto restarted but a host mounted file wasn't present it'll be auto
+# created as a directory instead of a file.
+- name: prometheus | check docker host file mounts
+  stat:
+    path: "{{ item }}"
+  with_items:
+  - /etc/prometheus/alertmanager.yml
+  - /etc/prometheus/blackbox-exporter.yml
+  - /etc/prometheus/prometheus.yml
+  register: prometheus_docker_file_mounts
+
+- name: prometheus | assert docker host file mounts
+  assert:
+    that: 'item.stat.isreg'
+  with_items: "{{ prometheus_docker_file_mounts.results }}"
+  # This is a sanity check so use no_log to reduce the excessive log output
+  # (there's nothing senstive in there)
+  # The asserts will be in the same order as the previous task
+  no_log: true

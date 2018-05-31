@@ -1,0 +1,53 @@
+---
+# tasks file for prometheus
+
+- name: prometheus | create directories
+  become: yes
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+  - /etc/prometheus
+  - /etc/prometheus/rules
+  - /etc/prometheus/targets
+
+- name: prometheus | prometheus configuration file
+  become: yes
+  template:
+    dest: /etc/prometheus/prometheus.yml
+    force: yes
+    src: etc-prometheus-prometheus-yml.j2
+  register: prometheus_configuration
+
+- name: prometheus | prometheus alert rules
+  become: yes
+  template:
+    dest: /etc/prometheus/rules/default-alert.rules.yml
+    force: yes
+    src: etc-prometheus-default-alert-rules-yml.j2
+  register: prometheus_alert_rules
+
+- name: prometheus | alertmanager configuration file
+  become: yes
+  template:
+    dest: /etc/prometheus/alertmanager.yml
+    force: yes
+    src: etc-prometheus-alertmanager-yml.j2
+  register: prometheus_alertmanager_configuration
+
+- name: prometheus | blackbox configuration file
+  become: yes
+  copy:
+    dest: /etc/prometheus/blackbox-exporter.yml
+    force: yes
+    src: etc-prometheus-blackbox-exporter.yml
+  register: prometheus_blackboxexporter_configuration
+
+- name: prometheus | file sd configs
+  become: yes
+  template:
+    dest: /etc/prometheus/targets/{{ item.groupname }}.yml
+    force: yes
+    src: file_sd_config-template-yml.j2
+  with_items:
+    - "{{ prometheus_sd_targets }}"
